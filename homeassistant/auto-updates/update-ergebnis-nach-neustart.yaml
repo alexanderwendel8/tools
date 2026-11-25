@@ -1,0 +1,32 @@
+# Update-Ergebnis nach Neustart melden (Testsystem)
+# Exportiert aus dem Home-Assistant-Testsystem (HA 2026.11.3).
+# Setzt voraus, dass die Automation „Nächtliche automatische Updates (Testsystem)“
+# die Entity-ID automation.nachtliche_automatische_updates_testsystem hat.
+# Dokumentation: siehe README.md in diesem Ordner.
+
+alias: Update-Ergebnis nach Neustart melden (Testsystem)
+description: >-
+  Meldet nach einem Neustart, der durch die nächtliche Update-Automation
+  ausgelöst wurde (innerhalb von 2 Stunden), ob Core und OS aktuell sind und
+  welche Versionen laufen.
+mode: single
+triggers:
+  - trigger: homeassistant
+    event: start
+conditions:
+  - condition: template
+    value_template: >-
+      {% set lt = state_attr('automation.nachtliche_automatische_updates_testsystem', 'last_triggered') %}{{ lt is not none and (now() - lt).total_seconds() < 7200 }}
+    note: Nur nach Neustarts melden, die kurz nach dem nächtlichen Update-Lauf passieren
+actions:
+  - delay:
+      minutes: 2
+    note: Supervisor- und Update-Entitäten brauchen nach dem Start etwas, bis sie ihre Versionen kennen
+  - action: persistent_notification.create
+    data:
+      notification_id: testsystem_update_ergebnis
+      title: 🔁 Testsystem wieder online
+      message: |-
+        {% set core = 'update.home_assistant_core_update' %}{% set os = 'update.home_assistant_operating_system_update' %}Core: {{ state_attr(core, 'installed_version') }} {{ '✅ aktuell' if is_state(core, 'off') else '⚠️ Update fehlgeschlagen/offen → ' ~ state_attr(core, 'latest_version') }}
+        OS: {{ state_attr(os, 'installed_version') }} {{ '✅ aktuell' if is_state(os, 'off') else '⚠️ noch offen → ' ~ state_attr(os, 'latest_version') }}
+        {% set left = states.update | selectattr('state', 'eq', 'on') | map(attribute='name') | list %}{{ 'Keine weiteren Updates offen.' if left | count == 0 else 'Noch offen: ' ~ left | join(', ') }}

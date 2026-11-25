@@ -1,0 +1,113 @@
+# Nächtliche automatische Updates (Testsystem)
+# Exportiert aus dem Home-Assistant-Testsystem (HA 2026.11.3).
+# Import: Einstellungen → Automationen → Neue Automation → ⋮ → „In YAML bearbeiten“,
+# Inhalt einfügen und speichern. Dokumentation: siehe README.md in diesem Ordner.
+
+alias: Nächtliche automatische Updates (Testsystem)
+description: >-
+  Installiert jede Nacht alle verfügbaren Updates (Apps, Marketplace, Firmware,
+  Supervisor, Core, OS) und meldet sie als Benachrichtigung in Home Assistant.
+  Core bzw. OS starten HA neu, daher pro Nacht höchstens eines davon
+  (Core zuerst, OS in der Folgenacht).
+mode: single
+triggers:
+  - trigger: time
+    at: "03:30:00"
+actions:
+  # Variablen in getrennten Schritten, damit die Reihenfolge garantiert ist
+  - variables:
+      system_updates:
+        - update.home_assistant_core_update
+        - update.home_assistant_operating_system_update
+        - update.home_assistant_supervisor_update
+  - variables:
+      pending: "{{ states.update | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
+  - variables:
+      normal_updates: "{{ pending | reject('in', system_updates) | list }}"
+  - variables:
+      marketplace_updated: "{{ normal_updates | select('in', integration_entities('marketplace')) | list | count > 0 }}"
+      summary: |-
+        {% for e in pending %}• {{ state_attr(e,'friendly_name') }}: {{ state_attr(e,'installed_version') }} → {{ state_attr(e,'latest_version') }}
+        {% endfor %}
+
+  - if:
+      - condition: template
+        value_template: "{{ pending | count == 0 }}"
+    then:
+      - stop: Keine Updates verfügbar
+
+  - action: persistent_notification.create
+    data:
+      notification_id: testsystem_update_lauf
+      title: "🔄 Testsystem: {{ pending | count }} Update(s) werden installiert"
+      message: "{{ summary }}"
+
+  - repeat:
+      for_each: "{{ normal_updates }}"
+      sequence:
+        - action: update.install
+          target:
+            entity_id: "{{ repeat.item }}"
+          continue_on_error: true
+    note: Apps, Marketplace und Geräte-Firmware nacheinander
+
+  - if:
+      - condition: state
+        entity_id: update.home_assistant_supervisor_update
+        state: "on"
+    then:
+      - action: update.install
+        target:
+          entity_id: update.home_assistant_supervisor_update
+        continue_on_error: true
+
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: update.home_assistant_core_update
+            state: "on"
+        sequence:
+          - action: persistent_notification.create
+            data:
+              notification_id: testsystem_update_ergebnis
+              title: "🔄 Testsystem: Core-Update"
+              message: >-
+                Core wird auf {{ state_attr('update.home_assistant_core_update','latest_version') }}
+                aktualisiert (mit Backup). Home Assistant startet danach neu.
+          - action: update.install
+            target:
+              entity_id: update.home_assistant_core_update
+            data:
+              backup: true
+      - conditions:
+          - condition: state
+            entity_id: update.home_assistant_operating_system_update
+            state: "on"
+        sequence:
+          - action: persistent_notification.create
+            data:
+              notification_id: testsystem_update_ergebnis
+              title: "🔄 Testsystem: OS-Update"
+              message: >-
+                Das Betriebssystem wird auf {{ state_attr('update.home_assistant_operating_system_update','latest_version') }}
+                aktualisiert. Das System startet danach neu.
+          - action: update.install
+            target:
+              entity_id: update.home_assistant_operating_system_update
+      - conditions:
+          - condition: template
+            value_template: "{{ marketplace_updated }}"
+        sequence:
+          - action: persistent_notification.create
+            data:
+              notification_id: testsystem_update_ergebnis
+              title: "✅ Testsystem: Updates installiert"
+              message: Marketplace-Integrationen wurden aktualisiert – Home Assistant wird jetzt neu gestartet.
+          - action: homeassistant.restart
+    default:
+      - action: persistent_notification.create
+        data:
+          notification_id: testsystem_update_ergebnis
+          title: "✅ Testsystem: Updates installiert"
+          message: >-
+            {% set left = states.update | selectattr('state','eq','on') | map(attribute='name') | list %}{{ 'Alle Updates wurden installiert.' if left | count == 0 else 'Fehlgeschlagen/offen: ' ~ left | join(', ') }}
