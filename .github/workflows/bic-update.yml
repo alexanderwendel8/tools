@@ -1,0 +1,39 @@
+name: BIC-Verzeichnis aktualisieren
+
+on:
+  schedule:
+    # Täglich 05:23 UTC (06:23 / 07:23 Wiener Zeit)
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bic-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: OeNB-Verzeichnis laden und vergleichen
+        run: python bic/update_bic.py
+
+      - name: Änderungen committen
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bic/data bic/changes
+          if git diff --cached --quiet; then
+            echo "Keine Änderungen zu committen."
+          else
+            git commit -m "BIC-Verzeichnis: Stand $(date -u +%Y-%m-%d)"
+            git push
+          fi
