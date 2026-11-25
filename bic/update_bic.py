@@ -18,6 +18,7 @@ import argparse
 import csv
 import datetime as dt
 import io
+import json
 import re
 import sys
 import urllib.request
@@ -89,6 +90,21 @@ def write_csv(path: Path, columns: list[str], rows: list[dict[str, str]]) -> Non
         w.writerows(rows)
 
 
+def write_changes_index() -> None:
+    """Schreibt changes/index.json (Liste der Tage mit Zählern) für die Weboberfläche."""
+    days = []
+    for f in sorted(CHANGES_DIR.glob("????-??-??.csv"), reverse=True):
+        with f.open(encoding=OUT_ENCODING, newline="") as fh:
+            kinds = [r.get("Änderung", "") for r in csv.DictReader(fh, delimiter=";")]
+        days.append({"datum": f.stem, "neu": kinds.count("neu"),
+                     "geaendert": kinds.count("geändert"), "entfernt": kinds.count("entfernt")})
+    CHANGES_DIR.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(days, ensure_ascii=False, indent=1) + "\n"
+    index = CHANGES_DIR / "index.json"
+    if not index.exists() or index.read_text(encoding="utf-8") != text:
+        index.write_text(text, encoding="utf-8")
+
+
 def diff(old: list[dict[str, str]], new: list[dict[str, str]], columns: list[str]):
     old_by_key = {r[KEY]: r for r in old}
     new_by_key = {r[KEY]: r for r in new}
@@ -125,6 +141,7 @@ def main() -> int:
     old_columns, old_rows = read_stored(DATA_FILE)
     if not old_rows:
         write_csv(DATA_FILE, columns, rows)
+        write_changes_index()
         print(f"Kein vorheriger Stand vorhanden – Ausgangsstand angelegt: {DATA_FILE}")
         return 0
 
@@ -148,6 +165,7 @@ def main() -> int:
         print("Keine Änderungen.")
 
     write_csv(DATA_FILE, columns, rows)
+    write_changes_index()
     return 0
 
 
