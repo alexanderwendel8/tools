@@ -1,0 +1,50 @@
+name: BIC-Weboberfläche veröffentlichen
+
+on:
+  # nach jedem täglichen Update (auch ohne Änderungen, damit „geprüft am“ aktuell bleibt)
+  workflow_run:
+    workflows: ["BIC-Verzeichnis aktualisieren"]
+    types: [completed]
+  # bei Änderungen an Oberfläche oder Daten auf main
+  push:
+    branches: [main]
+    paths: ["bic/**", ".github/workflows/bic-pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Seite zusammenstellen
+        run: |
+          mkdir -p _site/changes
+          cp bic/web/* _site/
+          cp -r bic/data _site/
+          cp bic/changes/* _site/changes/ 2>/dev/null || true
+          [ -f _site/changes/index.json ] || echo "[]" > _site/changes/index.json
+          echo "{\"geprueft\": \"$(TZ=Europe/Vienna date +%Y-%m-%d)\"}" > _site/build.json
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
